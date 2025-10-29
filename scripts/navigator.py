@@ -316,7 +316,7 @@ def compute_smooth_plan(path, v_desired=0.15, spline_alpha=0.05) -> TrajectoryPl
 
 class HeadingNavigator(BaseNavigator):
     def __init__(self,kpx: float = 1.0, kpy: float = 1.0, kdx: float = 0.2, kdy: float = 0.2,
-                 V_max: float = 0.5, kp: float = 1.0):
+                 V_max: float = 0.5, kp: float = 2.0):
         super().__init__("my_navigator")
         self.kp = kp
         self.kpx = kpx
@@ -327,9 +327,12 @@ class HeadingNavigator(BaseNavigator):
         # self.om_max is already defined as read only? Also not needed because we don't clip
         
         # Potential overrides for BaseNavigator's replan
-        self.replan_distance_threshold = 1.   # meters, default ~0.25
-        self.replan_heading_threshold  = 1.   # radians, default ~0.2
-        self.replan_time_threshold     = 2.0   # seconds between replans
+        # self.replan_distance_threshold = 0.25  # meters, default ~0.25
+        # self.replan_heading_threshold  = 0.2   # radians, default ~0.2
+        # self.replan_time_threshold     = 4.0   # seconds between replans
+        
+        # # Potential overrides for BaseNavigator's alignment
+        # self.align_threshold = 0.1  # radians (~6°)
         
         # Reset prev values
         self.V_prev = 0.
@@ -348,12 +351,12 @@ class HeadingNavigator(BaseNavigator):
 
     def compute_trajectory_tracking_control(self, state: TurtleBotState, plan: TrajectoryPlan, t: float) -> TurtleBotControl:
         
-        x_d = scipy.interpolate.splev(t, plan.path_x_spline, der=1)
-        xd_d = scipy.interpolate.splev(t, plan.path_x_spline, der=2)
-        xdd_d = scipy.interpolate.splev(t, plan.path_x_spline, der=3)
-        y_d = scipy.interpolate.splev(t, plan.path_y_spline, der=1)
-        yd_d = scipy.interpolate.splev(t, plan.path_y_spline, der=2)
-        ydd_d = scipy.interpolate.splev(t, plan.path_y_spline, der=3)
+        x_d = scipy.interpolate.splev(t, plan.path_x_spline, der=0)
+        xd_d = scipy.interpolate.splev(t, plan.path_x_spline, der=1)
+        xdd_d = scipy.interpolate.splev(t, plan.path_x_spline, der=2)
+        y_d = scipy.interpolate.splev(t, plan.path_y_spline, der=0)
+        yd_d = scipy.interpolate.splev(t, plan.path_y_spline, der=1)
+        ydd_d = scipy.interpolate.splev(t, plan.path_y_spline, der=2)
         
         dt = t - self.t_prev
         x = state.x 
