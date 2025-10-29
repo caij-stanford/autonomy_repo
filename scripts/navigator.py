@@ -314,25 +314,32 @@ def compute_smooth_plan(path, v_desired=0.15, spline_alpha=0.05) -> TrajectoryPl
         duration=ts[-1],
     )
 
-class ConstantController(BaseNavigator):
-    def __init__(self,kpx: float, kpy: float, kdx: float, kdy: float,
-                 V_max: float = 0.5, om_max: float = 1, kp = 2.0):
+class HeadingNavigator(BaseNavigator):
+    def __init__(self,kpx: float = 1.0, kpy: float = 1.0, kdx: float = 0.2, kdy: float = 0.2,
+                 V_max: float = 0.5, kp: float = 1.0):
         super().__init__("my_navigator")
         self.kp = kp
-        
         self.kpx = kpx
         self.kpy = kpy
         self.kdx = kdx
         self.kdy = kdy
         self.V_max = V_max
-        self.om_max = om_max
-        self.coeffs = np.zeros(8) # Polynomial coefficients for x(t) and y(t) as
-                                    # returned by the differential flatness code
+        # self.om_max is already defined as read only? Also not needed because we don't clip
+        
+        # Potential overrides for BaseNavigator's replan
+        self.replan_distance_threshold = 1.   # meters, default ~0.25
+        self.replan_heading_threshold  = 1.   # radians, default ~0.2
+        self.replan_time_threshold     = 2.0   # seconds between replans
+        
+        # Reset prev values
+        self.V_prev = 0.
+        self.t_prev = 0.
+        self.om_prev = 0.
       
     def compute_heading_control(self, curr: TurtleBotState, goal: TurtleBotState) -> TurtleBotControl:
-      heading_error = wrap_angle(goal.theta - curr.theta)
-      omega_control = self.kp * heading_error 
-      return TurtleBotControl(omega=omega_control)
+        heading_error = wrap_angle(goal.theta - curr.theta)
+        omega_control = self.kp * heading_error 
+        return TurtleBotControl(omega=omega_control)
   
     def reset(self) -> None:
         self.V_prev = 0.
@@ -341,17 +348,17 @@ class ConstantController(BaseNavigator):
 
     def compute_trajectory_tracking_control(self, state: TurtleBotState, plan: TrajectoryPlan, t: float) -> TurtleBotControl:
         
-        x_d = scipy.interpolate.splev([t], plan.path_x_spline, der=1)
-        xd_d = scipy.interpolate.splev([t], plan.path_x_spline, der=2)
-        xdd_d = scipy.interpolate.splev([t], plan.path_x_spline, der=3)
-        y_d = scipy.interpolate.splev([t], plan.path_y_spline, der=1)
-        yd_d = scipy.interpolate.splev([t], plan.path_y_spline, der=2)
-        ydd_d = scipy.interpolate.splev([t], plan.path_y_spline, der=3)
+        x_d = scipy.interpolate.splev(t, plan.path_x_spline, der=1)
+        xd_d = scipy.interpolate.splev(t, plan.path_x_spline, der=2)
+        xdd_d = scipy.interpolate.splev(t, plan.path_x_spline, der=3)
+        y_d = scipy.interpolate.splev(t, plan.path_y_spline, der=1)
+        yd_d = scipy.interpolate.splev(t, plan.path_y_spline, der=2)
+        ydd_d = scipy.interpolate.splev(t, plan.path_y_spline, der=3)
         
         dt = t - self.t_prev
         x = state.x 
         y = state.y 
-        th = state.th
+        th = state.theta
         
         ########## Code starts here ##########
         # avoid singularity
@@ -381,7 +388,7 @@ class ConstantController(BaseNavigator):
         self.V_prev = V
         self.om_prev = om
         
-        return TurtleBotControl(v = V, om=om)
+        return TurtleBotControl(v = V, omega=om)
   
     def compute_trajectory_plan(self, state: TurtleBotState, goal: TurtleBotState, 
                 occupancy: StochOccupancyGrid2D, resolution: float, horizon: float) -> T.Optional[TrajectoryPlan]:
@@ -389,16 +396,9 @@ class ConstantController(BaseNavigator):
         # From Ed: horizon should limit the search to a square of that size around the state.
         # This is encoded into our algorithm as statespace lo and hi. 
         # Let the horizon be the SQUARE of (horizon) x (horizon) around (state).
-        width = (int) (horizon)
-        height = (int) (horizon)
-        statespace_lo = (
-            int(state.x - width // 2),
-            int(state.y - height // 2)
-        )
-        statespace_hi = (
-            int(state.x + width // 2),
-            int(state.y + height // 2)
-        )
+        half = horizon / 2.0
+        statespace_lo = (state.x - half, state.y - half)
+        statespace_hi = (state.x + half, state.y + half)
         
         # We always search with our state at the center of the square
         x_init = (state.x, state.y)
@@ -408,16 +408,16 @@ class ConstantController(BaseNavigator):
         astar = AStar(statespace_lo, statespace_hi, x_init, x_goal, stoch_to_det(occupancy), resolution=resolution, norm_type=2)
         
         # Not valid path
-        if not astar.solve() or len(astar.plan) < 4:
+        if not astar.solve() or len(astar.path) < 4:
             return None
         
         # Path found: reset class properties 
         self.reset()
-        return compute_smooth_plan(astar.plan) # Returns a TrajectoryPlan
+        return compute_smooth_plan(astar.path) # Returns a TrajectoryPlan
         
 
 if __name__ == "__main__":
     rclpy.init()
-    node = ConstantController()
+    node = HeadingNavigator()
     rclpy.spin(node)
     rclpy.shutdown()
